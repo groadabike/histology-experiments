@@ -1,0 +1,23 @@
+# Configuration for scripts/download_data.py
+# Override any value from the command line, e.g.
+#   uv run python scripts/download_data.py 'datasets=[CRC-VAL-HE-7K]'
+#   uv run python scripts/download_data.py download.keep_zip=true
+
+zenodo:
+  record_id: 1214456  # Kather et al. (2018), doi:10.5281/zenodo.1214456
+
+# Archives to fetch (names without .zip)
+datasets:
+  - CRC-VAL-HE-7K             # external test set, ~0.8 GB
+  - NCT-CRC-HE-100K           # training set (Macenko-normalised), ~11.7 GB
+  # - NCT-CRC-HE-100K-NONORM  # optional: training set without colour normalisation, ~11.7 GB
+
+paths:
+  raw_dir: data/raw   # where the .zip files are saved
+  data_dir: data      # where archives are extracted (data/<DATASET>/<CLASS>/*.tif)
+
+download:
+  timeout: 60             # seconds per HTTP request
+  chunk_size: 8388608     # 8 MiB
+  verify_md5: true        # check each archive against Zenodo's checksum
+  keep_zip: false         # delete archives after successful extraction
