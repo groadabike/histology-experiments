@@ -1,0 +1,18 @@
+# Configuration for scripts/make_subset.py
+# Override from the command line, e.g.
+#   uv run python scripts/make_subset.py subset.per_class=1000
+#   uv run python scripts/make_subset.py train_set=NCT-CRC-HE-100K-NONORM
+
+train_set: NCT-CRC-HE-100K      # or NCT-CRC-HE-100K-NONORM
+external_set: CRC-VAL-HE-7K
+
+paths:
+  data_dir: data                # contains <DATASET>/<CLASS>/*.tif
+  splits_dir: splits            # output CSVs
+
+subset:
+  per_class: 3000               # patches sampled per class (9 classes -> 27k)
+  val_fraction: 0.2             # internal validation share of the subset
+  seed: 0
+
+image_extensions: [".tif", ".tiff", ".png", ".jpg"]
