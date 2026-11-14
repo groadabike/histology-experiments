@@ -1,144 +1,152 @@
-"""Download and extract the NCT-CRC-HE histology datasets from Zenodo.
+"""Extract and cache foundation-model features for histology patches.
 
-File names, sizes and md5 checksums are read from the Zenodo API, so the
-script stays correct if the record's download links change.
+Runs a frozen pathology foundation model (Phikon by default) once over each
+patch list and saves the CLS embedding per patch. Every later experiment then
+works on these cached features instead of re-running the model.
 
-Features
-- Resumes interrupted downloads (keeps a .part file and uses HTTP Range).
-- Verifies each archive against Zenodo's md5 checksum.
-- Skips datasets that were already extracted (marker file).
+Each job writes one .npz file containing:
+    features      float32 array, shape (n_patches, 768)
+    labels        class name per patch
+    paths         image path per patch (same order as the input CSV)
+    split         "train"/"val" for the training CSV, empty otherwise
+    stain_failed  True where Macenko normalisation failed and the original was kept
+    model, ops, reference, shift   metadata for reproducibility
 
 Usage
-    uv run python scripts/download_data.py
-    uv run python scripts/download_data.py 'datasets=[CRC-VAL-HE-7K]'   # small test first
+    uv run python scripts/extract_features.py
+    uv run python scripts/extract_features.py 'only=[external_shifted,external_shifted_macenko]'
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import zipfile
+import time
 from pathlib import Path
 
 import hydra
-import requests
-from hydra.utils import to_absolute_path
-from omegaconf import DictConfig
+import numpy as np
+import pandas as pd
+import torch
+from hydra.utils import get_original_cwd
+from omegaconf import DictConfig, OmegaConf
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+from transformers import AutoImageProcessor, ViTModel
+
+from stain import Macenko, StainShift, apply_ops, choose_reference, load_rgb
 
 log = logging.getLogger(__name__)
-
-ZENODO_API = "https://zenodo.org/api/records/{record_id}"
-ZENODO_FILE = "https://zenodo.org/records/{record_id}/files/{key}?download=1"
-
-
-def fetch_file_index(record_id: int, timeout: int) -> dict[str, dict]:
-    """Return {file name: metadata} for every file in a Zenodo record."""
-    response = requests.get(ZENODO_API.format(record_id=record_id), timeout=timeout)
-    response.raise_for_status()
-    return {entry["key"]: entry for entry in response.json()["files"]}
+# Silence a harmless note printed by every DataLoader worker on macOS.
+logging.getLogger("torch.distributed.elastic.multiprocessing.redirects").setLevel(logging.ERROR)
 
 
-def md5sum(path: Path, chunk_size: int) -> str:
-    """Compute the md5 hex digest of a file, reading it in chunks."""
-    digest = hashlib.md5()
-    with open(path, "rb") as handle, tqdm(
-        total=path.stat().st_size, unit="B", unit_scale=True, desc=f"md5 {path.name}"
-    ) as bar:
-        for block in iter(lambda: handle.read(chunk_size), b""):
-            digest.update(block)
-            bar.update(len(block))
-    return digest.hexdigest()
+def pick_device(name: str) -> torch.device:
+    """auto -> Apple GPU (mps) if available, then CUDA, then CPU."""
+    if name != "auto":
+        return torch.device(name)
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
 
 
-def download(url: str, dest: Path, expected_size: int, timeout: int, chunk_size: int) -> None:
-    """Stream a file to dest, resuming from dest.part if it exists."""
-    part = dest.with_suffix(dest.suffix + ".part")
-    done = part.stat().st_size if part.exists() else 0
+class PatchDataset(Dataset):
+    """Loads patches, applies stain operations, then the model's preprocessing."""
 
-    if expected_size and done >= expected_size:
-        part.rename(dest)
+    def __init__(self, paths, root: Path, processor, ops, reference: np.ndarray | None, shift_params):
+        self.paths = list(paths)
+        self.root = root
+        self.processor = processor
+        self.ops = list(ops)
+        self.reference = reference
+        self.shift_params = dict(shift_params)
+        self._macenko = None  # built lazily inside each worker process
+        self._shift = StainShift(**self.shift_params) if "shift" in self.ops else None
+
+    def __len__(self) -> int:
+        return len(self.paths)
+
+    def __getitem__(self, i: int):
+        img = Image.open(self.root / self.paths[i]).convert("RGB")
+        if "macenko" in self.ops and self._macenko is None:
+            self._macenko = Macenko(self.reference)
+        img, failed = apply_ops(img, self.ops, self._shift, self._macenko)
+        pixels = self.processor(images=img, return_tensors="pt")["pixel_values"][0]
+        return pixels, failed
+
+
+@hydra.main(version_base="1.3", config_path="../conf", config_name="features")
+def main(cfg: DictConfig) -> None:
+    root = Path(get_original_cwd())
+    device = pick_device(cfg.device)
+    log.info("Device: %s | model: %s", device, cfg.model.name)
+
+    jobs = [j for j in cfg.jobs if cfg.only is None or j.name in cfg.only]
+    pending = [j for j in jobs if cfg.overwrite or not (root / j.output).exists()]
+    for j in jobs:
+        if j not in pending:
+            log.info("Skipping %s: %s exists (set overwrite=true to redo)", j.name, j.output)
+    if not pending:
         return
 
-    headers = {"Range": f"bytes={done}-"} if done else {}
-    with requests.get(url, headers=headers, stream=True, timeout=timeout) as response:
-        response.raise_for_status()
-        if done and response.status_code != 206:
-            log.warning("Server ignored resume request; restarting %s", dest.name)
-            done = 0
+    processor = AutoImageProcessor.from_pretrained(cfg.model.name)
+    model = ViTModel.from_pretrained(cfg.model.name, add_pooling_layer=False).to(device).eval()
 
-        mode = "ab" if done else "wb"
-        with open(part, mode) as handle, tqdm(
-            total=expected_size or None,
-            initial=done,
-            unit="B",
-            unit_scale=True,
-            desc=dest.name,
-        ) as bar:
-            for block in response.iter_content(chunk_size=chunk_size):
-                handle.write(block)
-                bar.update(len(block))
+    reference, reference_path = None, ""
+    if any("macenko" in j.ops for j in pending):
+        train_csv = next(j.csv for j in cfg.jobs if j.name == "train")
+        ref_file = choose_reference(root, train_csv, cfg.stain.reference, cfg.stain.reference_label)
+        reference = load_rgb(ref_file)
+        reference_path = str(ref_file.relative_to(root))
+        log.info("Macenko reference patch: %s", reference_path)
 
-    part.rename(dest)
-
-
-def extract(zip_path: Path, out_dir: Path) -> None:
-    """Extract a zip archive into out_dir with a progress bar."""
-    with zipfile.ZipFile(zip_path) as archive:
-        members = archive.infolist()
-        for member in tqdm(members, desc=f"extract {zip_path.name}", unit="file"):
-            archive.extract(member, out_dir)
-
-
-@hydra.main(version_base="1.3", config_path="../conf", config_name="download")
-def main(cfg: DictConfig) -> None:
-    raw_dir = Path(to_absolute_path(cfg.paths.raw_dir))
-    data_dir = Path(to_absolute_path(cfg.paths.data_dir))
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    data_dir.mkdir(parents=True, exist_ok=True)
-
-    index = fetch_file_index(cfg.zenodo.record_id, cfg.download.timeout)
-    log.info("Zenodo record %s contains: %s", cfg.zenodo.record_id, sorted(index))
-
-    for name in cfg.datasets:
-        key = f"{name}.zip"
-        if key not in index:
-            raise KeyError(f"{key} not found in record; available: {sorted(index)}")
-
-        marker = data_dir / f".{name}.extracted"
-        if marker.exists():
-            log.info("%s already extracted, skipping", name)
-            continue
-
-        meta = index[key]
-        zip_path = raw_dir / key
-        url = meta.get("links", {}).get("self") or ZENODO_FILE.format(
-            record_id=cfg.zenodo.record_id, key=key
+    for job in pending:
+        df = pd.read_csv(root / job.csv)
+        shift_params = OmegaConf.to_container(cfg.stain.shift)
+        dataset = PatchDataset(df.path, root, processor, job.ops, reference, shift_params)
+        loader = DataLoader(
+            dataset,
+            batch_size=cfg.batch_size,
+            shuffle=False,  # keep the CSV order so features line up with labels
+            num_workers=cfg.num_workers,
+            persistent_workers=False,
         )
 
-        if not zip_path.exists():
-            log.info("Downloading %s (%.1f GB)", key, meta.get("size", 0) / 1e9)
-            download(url, zip_path, meta.get("size", 0), cfg.download.timeout, cfg.download.chunk_size)
+        features, failed = [], []
+        start = time.time()
+        with torch.inference_mode():
+            for pixels, fail in tqdm(loader, desc=job.name, unit="batch"):
+                out = model(pixel_values=pixels.to(device)).last_hidden_state[:, 0]
+                features.append(out.float().cpu().numpy())
+                failed.append(fail.numpy())
 
-        if cfg.download.verify_md5:
-            expected = meta["checksum"].split(":", 1)[-1]
-            actual = md5sum(zip_path, cfg.download.chunk_size)
-            if actual != expected:
-                zip_path.unlink()
-                raise RuntimeError(
-                    f"Checksum mismatch for {key} (expected {expected}, got {actual}); "
-                    "the corrupt file was deleted, run the script again."
-                )
-            log.info("%s checksum OK", key)
+        features = np.concatenate(features)
+        failed = np.concatenate(failed).astype(bool)
+        out_path = root / job.output
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            out_path,
+            features=features,
+            labels=df.label.to_numpy(dtype=str),
+            paths=df.path.to_numpy(dtype=str),
+            split=df["split"].to_numpy(dtype=str) if "split" in df.columns else np.array([], dtype=str),
+            stain_failed=failed,
+            model=np.array(cfg.model.name),
+            ops=np.array(list(job.ops), dtype=str),
+            reference=np.array(reference_path if "macenko" in job.ops else ""),
+            shift=np.array(StainShift(**shift_params).describe() if "shift" in job.ops else ""),
+        )
 
-        extract(zip_path, data_dir)
-        marker.touch()
-        log.info("%s extracted to %s", name, data_dir / name)
-
-        if not cfg.download.keep_zip:
-            zip_path.unlink()
-
-    log.info("Done.")
+        elapsed = time.time() - start
+        log.info(
+            "%s: %d patches -> %s %s in %.0fs (%.0f patches/s)",
+            job.name, len(df), job.output, features.shape, elapsed, len(df) / max(elapsed, 1e-9),
+        )
+        if "macenko" in job.ops:
+            log.info("%s: Macenko failed on %d of %d patches (originals kept)",
+                     job.name, failed.sum(), len(failed))
 
 
 if __name__ == "__main__":

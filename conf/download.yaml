@@ -1,23 +1,21 @@
-# Configuration for scripts/download_data.py
-# Override any value from the command line, e.g.
-#   uv run python scripts/download_data.py 'datasets=[CRC-VAL-HE-7K]'
-#   uv run python scripts/download_data.py download.keep_zip=true
+# Configuration for scripts/plot_stain_example.py
+# Examples
+#   uv run python scripts/plot_stain_example.py
+#   uv run python scripts/plot_stain_example.py 'classes=[TUM]' seed=3
+#   uv run python scripts/plot_stain_example.py 'columns=[original,macenko]'
 
-zenodo:
-  record_id: 1214456  # Kather et al. (2018), doi:10.5281/zenodo.1214456
+defaults:
+  - stain                   # conf/stain.yaml: same reference and shift as feature extraction
+  - _self_
 
-# Archives to fetch (names without .zip)
-datasets:
-  - CRC-VAL-HE-7K             # external test set, ~0.8 GB
-  - NCT-CRC-HE-100K           # training set (Macenko-normalised), ~11.7 GB
-  # - NCT-CRC-HE-100K-NONORM  # optional: training set without colour normalisation, ~11.7 GB
+train_csv: splits/train.csv
+external_csv: splits/external.csv
 
-paths:
-  raw_dir: data/raw   # where the .zip files are saved
-  data_dir: data      # where archives are extracted (data/<DATASET>/<CLASS>/*.tif)
+classes: [TUM, STR, NORM, LYM]   # one row per class
+seed: 0                          # change to see different random examples
 
-download:
-  timeout: 60             # seconds per HTTP request
-  chunk_size: 8388608     # 8 MiB
-  verify_md5: true        # check each archive against Zenodo's checksum
-  keep_zip: false         # delete archives after successful extraction
+# Any of: training, original, macenko, shifted, shifted_macenko
+columns: [training, original, shifted, shifted_macenko]
+
+output: figs/stain_example.png
+dpi: 150
