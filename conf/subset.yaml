@@ -1,18 +1,16 @@
-# Configuration for scripts/make_subset.py
-# Override from the command line, e.g.
-#   uv run python scripts/make_subset.py subset.per_class=1000
-#   uv run python scripts/make_subset.py train_set=NCT-CRC-HE-100K-NONORM
+# Stain settings shared by extract_features.py and plot_stain_example.py
 
-train_set: NCT-CRC-HE-100K      # or NCT-CRC-HE-100K-NONORM
-external_set: CRC-VAL-HE-7K
+stain:
+  # Macenko normalisation target
+  reference: null          # path to the reference patch; null = pick one automatically
+  reference_label: TUM     # auto-pick: first training patch of this class
 
-paths:
-  data_dir: data                # contains <DATASET>/<CLASS>/*.tif
-  splits_dir: splits            # output CSVs
-
-subset:
-  per_class: 3000               # patches sampled per class (9 classes -> 27k)
-  val_fraction: 0.2             # internal validation share of the subset
-  seed: 0
-
-image_extensions: [".tif", ".tiff", ".png", ".jpg"]
+  # Controlled stain shift simulating a lab with different staining.
+  # Applied in haematoxylin-eosin-DAB (HED) colour space to every patch in the same way:
+  #   H' = H * h_scale + h_bias      E' = E * e_scale + e_bias
+  # 1.0 / 0.0 leaves the image unchanged.
+  shift:
+    h_scale: 1.4           # stronger haematoxylin (nuclei darker, bluer)
+    e_scale: 0.6           # weaker eosin (cytoplasm and stroma paler)
+    h_bias: 0.0
+    e_bias: 0.0
