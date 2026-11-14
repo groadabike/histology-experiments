@@ -1,0 +1,42 @@
+# Configuration for scripts/extract_features.py
+# Examples
+#   uv run python scripts/extract_features.py                                  # all jobs
+#   uv run python scripts/extract_features.py 'only=[external_shifted,external_shifted_macenko]'
+#   uv run python scripts/extract_features.py stain.shift.h_scale=1.6 overwrite=true
+
+defaults:
+  - stain                   # conf/stain.yaml (Macenko reference + stain shift)
+  - _self_
+
+model:
+  name: owkin/phikon        # Hugging Face id (ViT-B/16, 768-d CLS embedding)
+
+device: auto                # auto -> mps (Apple GPU) > cuda > cpu
+batch_size: 64
+num_workers: 4              # parallel image loading; lower it if memory is tight
+overwrite: false            # skip jobs whose output already exists
+
+only: null                  # e.g. [train] or [external, external_macenko]; null = run all
+
+# ops are applied in order: "shift" (simulated other lab), "macenko" (normalise)
+jobs:
+  - name: train
+    csv: splits/train.csv
+    output: feats/train.npz
+    ops: []
+  - name: external
+    csv: splits/external.csv
+    output: feats/external.npz
+    ops: []
+  - name: external_macenko
+    csv: splits/external.csv
+    output: feats/external_macenko.npz
+    ops: [macenko]
+  - name: external_shifted
+    csv: splits/external.csv
+    output: feats/external_shifted.npz
+    ops: [shift]
+  - name: external_shifted_macenko
+    csv: splits/external.csv
+    output: feats/external_shifted_macenko.npz
+    ops: [shift, macenko]
