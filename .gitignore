@@ -1,0 +1,14 @@
+# Data and generated artefacts
+data/
+feats/
+splits/
+outputs/
+multirun/
+
+# Python / uv
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store

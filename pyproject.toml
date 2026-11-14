@@ -2,4 +2,15 @@
 name = "histology-experiments"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "hydra-core>=1.3.8",
+    "matplotlib>=3.11.2",
+    "pandas>=3.1.1",
+    "requests>=2.34.2",
+    "scikit-learn>=1.9.1",
+    "torch>=2.15.0",
+    "torchstain>=1.4.1",
+    "torchvision>=0.29.2",
+    "tqdm>=4.70.1",
+    "transformers>=5.23.0",
+]
