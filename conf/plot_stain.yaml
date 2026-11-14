@@ -1,0 +1,21 @@
+# Configuration for scripts/plot_stain_example.py
+# Examples
+#   uv run python scripts/plot_stain_example.py
+#   uv run python scripts/plot_stain_example.py 'classes=[TUM]' seed=3
+#   uv run python scripts/plot_stain_example.py 'columns=[original,macenko]'
+
+defaults:
+  - stain                   # conf/stain.yaml: same reference and shift as feature extraction
+  - _self_
+
+train_csv: splits/train.csv
+external_csv: splits/external.csv
+
+classes: [TUM, STR, NORM, LYM]   # one row per class
+seed: 0                          # change to see different random examples
+
+# Any of: training, original, macenko, shifted, shifted_macenko
+columns: [training, original, shifted, shifted_macenko]
+
+output: figs/stain_example.png
+dpi: 150
