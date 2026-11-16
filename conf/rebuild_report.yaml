@@ -1,0 +1,12 @@
+# Configuration for scripts/rebuild_report.py
+# Examples
+#   uv run python scripts/rebuild_report.py run_dir=results/resnet model_label=ResNet-50
+#   uv run python scripts/rebuild_report.py run_dir=results/resnet_nojitter "model_label='ResNet-50, no colour jitter'"
+
+run_dir: ???                 # folder with probs_<set>.npz (required)
+model_label: ???             # used in figure titles (required)
+fig_prefix: null             # null = run folder name
+figures_dir: figs
+confusion_for: [external, external_shifted]
+n_bootstrap: 1000
+seed: 0
