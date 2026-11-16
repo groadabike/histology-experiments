@@ -1,0 +1,56 @@
+# Configuration for scripts/finetune_resnet.py
+# Examples
+#   uv run python scripts/finetune_resnet.py
+#   uv run python scripts/finetune_resnet.py debug.max_train_batches=20 debug.eval_samples=500   # 2-minute smoke test
+#   uv run python scripts/finetune_resnet.py augment.color_jitter=false output_dir=results/resnet_nojitter \
+#       "model_label='ResNet-50, no colour jitter'"
+
+defaults:
+  - stain                   # conf/stain.yaml: same reference and shift as the probe
+  - _self_
+
+train_csv: splits/train.csv      # same subset and train/val split as the probe
+external_csv: splits/external.csv
+
+model:
+  pretrained: true               # ImageNet weights (IMAGENET1K_V2, downloaded on first run)
+  trainable: [layer4, fc]        # everything else is frozen, including its BatchNorm statistics
+
+train:
+  epochs: 3
+  batch_size: 64
+  lr: 3.0e-4
+  weight_decay: 1.0e-4           # AdamW, cosine learning-rate schedule
+
+augment:
+  flips: true                    # horizontal and vertical flips (tissue has no orientation)
+  color_jitter: true             # mild brightness/contrast/saturation/hue jitter
+  jitter: {brightness: 0.1, contrast: 0.1, saturation: 0.1, hue: 0.05}
+
+device: auto                     # auto -> mps (Apple GPU) > cuda > cpu
+num_workers: 4
+eval_batch_size: 128
+seed: 0
+
+# External conditions, built on the fly from the images with conf/stain.yaml
+conditions:
+  - name: external
+    ops: []
+  - name: external_macenko
+    ops: [macenko]
+  - name: external_shifted
+    ops: [shift]
+  - name: external_shifted_macenko
+    ops: [shift, macenko]
+
+n_bootstrap: 1000
+confusion_for: [external, external_shifted]
+
+output_dir: results/resnet
+figures_dir: figs
+fig_prefix: null              # null = output folder name, e.g. resnet_nojitter
+model_label: ResNet-50        # used in figure titles
+
+debug:
+  max_train_batches: null        # e.g. 20 to cap batches per epoch for a quick test
+  eval_samples: null             # e.g. 500 to evaluate on a random sample of each set
