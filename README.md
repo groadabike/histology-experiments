@@ -4,9 +4,10 @@ How well does a histology image classifier hold up on patients, and stains, it h
 
 This project compares a linear probe on a pathology foundation model (Phikon) with a fine-tuned ImageNet ResNet-50 for classifying H&E-stained colorectal tissue patches into nine tissue types. Both are tested on an external set from different patients, under a simulated stain shift, and with Macenko stain normalisation. Beyond accuracy, it measures calibration: whether a model's confidence can be trusted when the data change.
 
-**Key result.** On the external set, the two approaches performed equally well (balanced accuracy 0.937 vs 0.935). Under a simulated stain shift, the frozen foundation-model features lost 8.2 points and became overconfident, while the fine-tuned CNN lost 1.3 points without colour augmentation and 0.2 with it. Per-patch Macenko normalisation lowered accuracy for every model, mainly through errors on debris.
+[//]: # (**Key result.** On the external set, the two approaches performed equally well &#40;balanced accuracy 0.937 vs 0.935&#41;. Under a simulated stain shift, the frozen foundation-model features lost 8.2 points and became overconfident, while the fine-tuned CNN lost 1.3 points without colour augmentation and 0.2 with it. Per-patch Macenko normalisation lowered accuracy for every model, mainly through errors on debris.)
 
-![Balanced accuracy by model and evaluation set](figs/comparison.png)
+[//]: # ()
+[//]: # (![Balanced accuracy by model and evaluation set]&#40;figs/comparison.png&#41;)
 
 ---
 
@@ -14,8 +15,10 @@ This project compares a linear probe on a pathology foundation model (Phikon) wi
 
 - [Data](#data)
 - [Methods](#methods)
-- [Results](#results)
-- [Limitations](#limitations)
+
+[//]: # (- [Results]&#40;#results&#41;)
+
+[//]: # (- [Limitations]&#40;#limitations&#41;)
 - [How to run](#how-to-run)
 - [Repository structure](#repository-structure)
 - [References](#references)
@@ -32,7 +35,7 @@ This project compares a linear probe on a pathology foundation model (Phikon) wi
 - **Images:** 224 × 224 px H&E patches.
 - **Classes (9):** adipose (ADI), background (BACK), debris (DEB), lymphocytes (LYM), mucus (MUC), smooth muscle (MUS), normal colon mucosa (NORM), cancer-associated stroma (STR), colorectal adenocarcinoma epithelium (TUM).
 - **Colour:** the training set was Macenko-normalised by the dataset authors, and the external patches show little colour difference from it. The stain shift below therefore simulates a lab with genuinely different staining.
-- **Licence:** see the Zenodo record. The data are not redistributed here.
+- **Licence:** CC BY 4.0 (Kather, Halama & Marx, 2018; see References). The data are not redistributed here..
 
 ---
 
@@ -66,41 +69,68 @@ All models use the same training subset and the same train/validation split. No 
 
 ---
 
-## Results
+[//]: # ()
+[//]: # (## Results)
 
-| Evaluation set | Phikon probe | ResNet-50 | ResNet-50, no colour jitter |
-|---|---|---|---|
-| Internal validation | 0.998 | 0.990 | 0.991 |
-| External | 0.937 | 0.935 | 0.923 |
-| External, stain-shifted | 0.855 | 0.933 | 0.910 |
-| External + Macenko | 0.861 | 0.891 | 0.887 |
-| Shifted + Macenko | 0.873 | 0.863 | 0.871 |
-| **Change under stain shift (points)** | **−8.2** | **−0.2** | **−1.3** |
-| ECE on stain-shifted data | 0.060 | 0.021 | 0.034 |
+[//]: # ()
+[//]: # (| Evaluation set | Phikon probe | ResNet-50 | ResNet-50, no colour jitter |)
 
-Balanced accuracy unless stated. Full metrics, confidence intervals and per-class F1 are in `results/<model>/`.
+[//]: # (|---|---|---|---|)
 
-| Phikon probe, external | ResNet-50, external |
-|---|---|
-| ![Phikon probe confusion matrix, external set](figs/probe_cm_external.png) | ![ResNet-50 confusion matrix, external set](figs/resnet_cm_external.png) |
+[//]: # (| Internal validation | 0.998 | 0.990 | 0.991 |)
 
-### Findings
+[//]: # (| External | 0.937 | 0.935 | 0.923 |)
 
-1. **Internal validation overstates performance.** Every model scores 0.99 or more internally and 0.92–0.94 externally, and the internal ranking does not carry over. Most external errors are in smooth muscle and stroma (probe F1 0.74 for both).
-2. **The two approaches generalise equally well on the data as released**, with different error profiles. The ResNet-50 handles smooth muscle better (F1 0.85 vs 0.74); the probe is stronger on debris, normal mucosa and lymphocytes.
-3. **Frozen foundation-model features are the most sensitive to stain variation.** Under the stain shift the probe loses 8.2 points, mostly on tumour (F1 0.99 → 0.82), stroma and smooth muscle, and its calibration error nearly triples: it is more often wrong without being less confident. The fine-tuned CNN loses 1.3 points even without colour augmentation, so most of its robustness comes from fine-tuning rather than from augmentation.
-4. **Per-patch Macenko normalisation is not a safe default.** It partly recovers the probe on shifted data (0.855 → 0.873) but lowers accuracy for every model on the unshifted external set, and debris collapses in all three (to F1 0.64–0.68 on shifted data). Per-patch stain estimates are unreliable on patches without a typical haematoxylin–eosin mix, yet only one patch failed outright, so the damage is silent. Normalising at slide level, where stain vectors are estimated over much more tissue, is the usual remedy.
+[//]: # (| External, stain-shifted | 0.855 | 0.933 | 0.910 |)
 
----
+[//]: # (| External + Macenko | 0.861 | 0.891 | 0.887 |)
 
-## Limitations
+[//]: # (| Shifted + Macenko | 0.873 | 0.863 | 0.871 |)
 
-- **One training run per model.** Confidence intervals cover patch sampling only, not training randomness. Differences of about one point (for example, with and without colour jitter) could change with another seed; the 8-point gap is far larger.
-- **Optimistic confidence intervals.** Patches, not patients, are resampled, and patches from one patient are correlated.
-- **Possible patient-level leakage in internal validation.** The training set has no patient identifiers, so the internal split can place patches from the same patient on both sides.
-- **A simulated stain shift.** One global transformation is a controlled test, not a substitute for real data from other labs and scanners.
-- **Patch-level task.** Patches are pre-extracted and labelled; whole-slide tiling, tissue detection and slide-level aggregation are not covered.
-- **Subset training.** 27,000 of 100,000 training patches are used, for speed.
+[//]: # (| **Change under stain shift &#40;points&#41;** | **−8.2** | **−0.2** | **−1.3** |)
+
+[//]: # (| ECE on stain-shifted data | 0.060 | 0.021 | 0.034 |)
+
+[//]: # ()
+[//]: # (Balanced accuracy unless stated. Full metrics, confidence intervals and per-class F1 are in `results/<model>/`.)
+
+[//]: # ()
+[//]: # (| Phikon probe, external | ResNet-50, external |)
+
+[//]: # (|---|---|)
+
+[//]: # (| ![Phikon probe confusion matrix, external set]&#40;figs/probe_cm_external.png&#41; | ![ResNet-50 confusion matrix, external set]&#40;figs/resnet_cm_external.png&#41; |)
+
+[//]: # ()
+[//]: # (### Findings)
+
+[//]: # ()
+[//]: # (1. **Internal validation overstates performance.** Every model scores 0.99 or more internally and 0.92–0.94 externally, and the internal ranking does not carry over. Most external errors are in smooth muscle and stroma &#40;probe F1 0.74 for both&#41;.)
+
+[//]: # (2. **The two approaches generalise equally well on the data as released**, with different error profiles. The ResNet-50 handles smooth muscle better &#40;F1 0.85 vs 0.74&#41;; the probe is stronger on debris, normal mucosa and lymphocytes.)
+
+[//]: # (3. **Frozen foundation-model features are the most sensitive to stain variation.** Under the stain shift the probe loses 8.2 points, mostly on tumour &#40;F1 0.99 → 0.82&#41;, stroma and smooth muscle, and its calibration error nearly triples: it is more often wrong without being less confident. The fine-tuned CNN loses 1.3 points even without colour augmentation, so most of its robustness comes from fine-tuning rather than from augmentation.)
+
+[//]: # (4. **Per-patch Macenko normalisation is not a safe default.** It partly recovers the probe on shifted data &#40;0.855 → 0.873&#41; but lowers accuracy for every model on the unshifted external set, and debris collapses in all three &#40;to F1 0.64–0.68 on shifted data&#41;. Per-patch stain estimates are unreliable on patches without a typical haematoxylin–eosin mix, yet only one patch failed outright, so the damage is silent. Normalising at slide level, where stain vectors are estimated over much more tissue, is the usual remedy.)
+
+[//]: # ()
+[//]: # (---)
+
+[//]: # ()
+[//]: # (## Limitations)
+
+[//]: # ()
+[//]: # (- **One training run per model.** Confidence intervals cover patch sampling only, not training randomness. Differences of about one point &#40;for example, with and without colour jitter&#41; could change with another seed; the 8-point gap is far larger.)
+
+[//]: # (- **Optimistic confidence intervals.** Patches, not patients, are resampled, and patches from one patient are correlated.)
+
+[//]: # (- **Possible patient-level leakage in internal validation.** The training set has no patient identifiers, so the internal split can place patches from the same patient on both sides.)
+
+[//]: # (- **A simulated stain shift.** One global transformation is a controlled test, not a substitute for real data from other labs and scanners.)
+
+[//]: # (- **Patch-level task.** Patches are pre-extracted and labelled; whole-slide tiling, tissue detection and slide-level aggregation are not covered.)
+
+[//]: # (- **Subset training.** 27,000 of 100,000 training patches are used, for speed.)
 
 ---
 
@@ -179,12 +209,20 @@ All random seeds are fixed, so subsets, splits and bootstrap intervals are repro
 
 ## References
 
-- Kather, J. N., et al. (2019). Predicting survival from colorectal cancer histology slides using deep learning: a retrospective multicenter study. *PLOS Medicine*, 16(1), e1002730. Data: Zenodo, doi:10.5281/zenodo.1214456.
-- Filiot, A., et al. (2023). Scaling self-supervised learning for histopathology with masked image modeling. *medRxiv*. Model: [owkin/phikon](https://huggingface.co/owkin/phikon).
-- Macenko, M., et al. (2009). A method for normalizing histology slides for quantitative analysis. *IEEE International Symposium on Biomedical Imaging*, 1107–1110.
-- Ruifrok, A. C., & Johnston, D. A. (2001). Quantification of histochemical staining by color deconvolution. *Analytical and Quantitative Cytology and Histology*, 23(4), 291–299.
-- He, K., et al. (2016). Deep residual learning for image recognition. *IEEE CVPR*, 770–778.
-- Guo, C., et al. (2017). On calibration of modern neural networks. *ICML*, 1321–1330.
+
+**Data**
+
+- Kather, J. N., Halama, N., & Marx, A. (2018). *100,000 histological images of human colorectal cancer and healthy tissue* (Version v0.1) [Data set]. Zenodo. https://doi.org/10.5281/zenodo.1214456 (CC BY 4.0). Contains NCT-CRC-HE-100K and CRC-VAL-HE-7K.
+- Kather, J. N., et al. (2019). Predicting survival from colorectal cancer histology slides using deep learning: A retrospective multicenter study. *PLOS Medicine*, 16(1), e1002730. https://doi.org/10.1371/journal.pmed.1002730
+
+**Models**
+
+- Filiot, A., Ghermi, R., Olivier, A., Jacob, P., Fidon, L., Mac Kain, A., Saillard, C., & Schiratti, J.-B. (2023). Scaling self-supervised learning for histopathology with masked image modeling. *medRxiv*. https://doi.org/10.1101/2023.07.21.23292757. Weights: [owkin/phikon](https://huggingface.co/owkin/phikon).
+- He, K., Zhang, X., Ren, S., & Sun, J. (2016). Deep residual learning for image recognition. *IEEE Conference on Computer Vision and Pattern Recognition (CVPR)*, 770–778. https://doi.org/10.1109/CVPR.2016.90
+
+**Methods**
+
+- Macenko, M., et al. (2009). A method for normalizing histology slides for quantitative analysis. *IEEE International Symposium on Biomedical Imaging (ISBI)*, 1107–1110. https://doi.org/10.1109/ISBI.2009.5193250
 
 ---
 
