@@ -1,0 +1,30 @@
+# Configuration for scripts/probe_eval.py
+# Examples
+#   uv run python scripts/probe_eval.py
+#   uv run python scripts/probe_eval.py 'probe.C_grid=[0.1]' n_bootstrap=0   # quick run
+
+train_features: feats/train.npz     # contains the train/val split
+
+# External conditions to evaluate (missing files are skipped with a warning)
+conditions:
+  - name: external
+    file: feats/external.npz
+  - name: external_macenko
+    file: feats/external_macenko.npz
+  - name: external_shifted
+    file: feats/external_shifted.npz
+  - name: external_shifted_macenko
+    file: feats/external_shifted_macenko.npz
+
+probe:
+  C_grid: [0.01, 0.1, 1.0]   # inverse regularisation; chosen on internal validation only
+  max_iter: 3000
+
+n_bootstrap: 1000            # resamples for 95% CIs on balanced accuracy (0 = skip)
+seed: 0
+
+# Confusion matrices to draw (internal validation is always drawn)
+confusion_for: [external, external_shifted]
+
+output_dir: results/probe
+figures_dir: figs
