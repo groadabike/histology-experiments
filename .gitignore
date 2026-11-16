@@ -5,6 +5,10 @@ splits/
 outputs/
 multirun/
 
+# Large prediction files and model weights (metrics tables are kept)
+results/**/probs_*.npz
+results/**/*.pt
+
 # Python / uv
 __pycache__/
 *.pyc
