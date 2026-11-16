@@ -1,8 +1,12 @@
 # Colorectal Histology: Tissue Classification with External Validation
 
-This project trains and compares two approaches for classifying H&E-stained colorectal tissue patches into nine tissue types, then tests both on an independent external dataset. 
+How well does a histology image classifier hold up on patients, and stains, it has never seen?
 
-**Key result:** _[One sentence once results are in, e.g. "On external data, the foundation-model probe lost X points of balanced accuracy versus Y for the fine-tuned CNN; Macenko stain normalisation recovered Z points."]_
+This project compares a linear probe on a pathology foundation model (Phikon) with a fine-tuned ImageNet ResNet-50 for classifying H&E-stained colorectal tissue patches into nine tissue types. Both are tested on an external set from different patients, under a simulated stain shift, and with Macenko stain normalisation. Beyond accuracy, it measures calibration: whether a model's confidence can be trusted when the data change.
+
+**Key result.** On the external set, the two approaches performed equally well (balanced accuracy 0.937 vs 0.935). Under a simulated stain shift, the frozen foundation-model features lost 8.2 points and became overconfident, while the fine-tuned CNN lost 1.3 points without colour augmentation and 0.2 with it. Per-patch Macenko normalisation lowered accuracy for every model, mainly through errors on debris.
+
+![Balanced accuracy by model and evaluation set](figs/comparison.png)
 
 ---
 
@@ -21,13 +25,14 @@ This project trains and compares two approaches for classifying H&E-stained colo
 ## Data
 
 | Set | Use | Size | Source |
-|---|---|---|----|
-| NCT-CRC-HE-100K | Training and internal validation | ~100,000 patches (a stratified subset of 3,000 per class is used) | Kather et al., Zenodo |
-| CRC-VAL-HE-7K | External test | ~7,000 patches from different patients | Kather et al., Zenodo |
+|---|---|---|---|
+| NCT-CRC-HE-100K | Training and internal validation | 100,000 patches; a stratified subset of 3,000 per class (27,000) is used, split 80/20 | Kather et al., Zenodo |
+| CRC-VAL-HE-7K | External test | 7,180 patches from 50 patients, none shared with the training set | Kather et al., Zenodo |
 
 - **Images:** 224 × 224 px H&E patches.
 - **Classes (9):** adipose (ADI), background (BACK), debris (DEB), lymphocytes (LYM), mucus (MUC), smooth muscle (MUS), normal colon mucosa (NORM), cancer-associated stroma (STR), colorectal adenocarcinoma epithelium (TUM).
-- **Licence:** see the Zenodo record for terms of use. The data are not redistributed in this repository.
+- **Colour:** the training set was Macenko-normalised by the dataset authors, and the external patches show little colour difference from it. The stain shift below therefore simulates a lab with genuinely different staining.
+- **Licence:** see the Zenodo record. The data are not redistributed here.
 
 ---
 
@@ -35,97 +40,112 @@ This project trains and compares two approaches for classifying H&E-stained colo
 
 ### Models
 
-1. **Fine-tuned CNN.** ResNet-50 pretrained on ImageNet; all layers frozen except the last residual block and a new classification head. Trained for 3 epochs with AdamW, mixed precision, and flip and colour-jitter augmentation.
-2. **Foundation model + linear probe.** [Phikon](https://huggingface.co/owkin/phikon), a ViT-B pathology foundation model pretrained with self-supervision on histology, used as a frozen feature extractor (768-d CLS embedding per patch). A standardised logistic-regression classifier is trained on the cached features.
+1. **Foundation model + linear probe.** [Phikon](https://huggingface.co/owkin/phikon), a ViT-B/16 pretrained with self-supervision on histology, is used as a frozen feature extractor (768-d CLS embedding per patch). A standardised logistic-regression classifier is trained on the cached features; its regularisation strength (C ∈ {0.01, 0.1, 1}) is chosen on internal validation.
+2. **Fine-tuned CNN.** ResNet-50 pretrained on ImageNet. Only the last residual block and a new classification head are trained (15.0M of 23.5M parameters); frozen layers also keep their BatchNorm statistics. Three epochs, AdamW (lr 3 × 10⁻⁴, cosine schedule), flips and mild colour jitter. The epoch with the best internal validation score is kept.
+3. **Control: fine-tuned CNN without colour jitter.** Identical to model 2 but with flips only, to separate the effect of fine-tuning from the effect of colour augmentation.
 
-### Evaluation
+All models use the same training subset and the same train/validation split. No external data is used for any choice.
 
-- **Internal validation:** stratified 80/20 split of the training subset (fixed seed, identical for both models).
-- **External test:** the full CRC-VAL-HE-7K set, never used for training or model selection.
-- **Metrics:** balanced accuracy (robust to class imbalance), per-class precision / recall / F1, row-normalised confusion matrices, and expected calibration error (ECE, 15 bins).
+### Stain conditions
 
-### Robustness experiment
+| Condition | What is done to the external patches |
+|---|---|
+| External | Nothing: patches as released |
+| External, stain-shifted | A fixed shift simulating another lab: each patch is separated into haematoxylin and eosin by colour deconvolution (Ruifrok & Johnston), haematoxylin × 1.4 and eosin × 0.6, then recombined |
+| External + Macenko | Macenko normalisation of each patch to a reference tumour patch from the training split ([torchstain](https://github.com/EIDOSLAB/torchstain)) |
+| Shifted + Macenko | The stain shift, then Macenko normalisation |
 
-The external images are stain-normalised with the Macenko method (via `torchstain`) to a reference training patch, features are re-extracted, and the external evaluation is repeated. Patches where normalisation fails (typically background or near-empty tiles) are left unnormalised and counted.
+![Training, external, stain-shifted and normalised patches](figs/stain_example.png)
+
+### Metrics
+
+- **Balanced accuracy** (mean per-class recall) with a 95% bootstrap confidence interval (1,000 resamples of patches).
+- **Macro F1** and per-class F1.
+- **Expected calibration error** (ECE, 15 bins): the average gap between a model's confidence and its accuracy.
+- Row-normalised confusion matrices and reliability diagrams.
 
 ---
 
 ## Results
 
-| Model | Internal bal. acc. | External bal. acc. | Internal ECE | External ECE |
-|---|---|---|---|---|
-| ResNet-50 (fine-tuned) | _x.xxx_ | _x.xxx_ | _x.xxx_ | _x.xxx_ |
-| Phikon + linear probe | _x.xxx_ | _x.xxx_ | _x.xxx_ | _x.xxx_ |
-| Phikon + linear probe, Macenko-normalised external set | – | _x.xxx_ | – | _x.xxx_ |
+| Evaluation set | Phikon probe | ResNet-50 | ResNet-50, no colour jitter |
+|---|---|---|---|
+| Internal validation | 0.998 | 0.990 | 0.991 |
+| External | 0.937 | 0.935 | 0.923 |
+| External, stain-shifted | 0.855 | 0.933 | 0.910 |
+| External + Macenko | 0.861 | 0.891 | 0.887 |
+| Shifted + Macenko | 0.873 | 0.863 | 0.871 |
+| **Change under stain shift (points)** | **−8.2** | **−0.2** | **−1.3** |
+| ECE on stain-shifted data | 0.060 | 0.021 | 0.034 |
 
-**Confusion matrices**
+Balanced accuracy unless stated. Full metrics, confidence intervals and per-class F1 are in `results/<model>/`.
 
-| Internal | External |
+| Phikon probe, external | ResNet-50, external |
 |---|---|
-| ![Internal confusion matrix](figs/cm_internal.png) | ![External confusion matrix](figs/cm_external.png) |
+| ![Phikon probe confusion matrix, external set](figs/probe_cm_external.png) | ![ResNet-50 confusion matrix, external set](figs/resnet_cm_external.png) |
 
-**Observations** _(to complete)_
+### Findings
 
-- Which model generalised better, and by how much.
-- Which classes failed most externally (e.g. stroma vs smooth muscle, debris vs mucus) and a likely reason.
-- Whether stain normalisation helped, hurt or made no difference, and how many patches it failed on.
-- Whether models became over- or under-confident on external data.
+1. **Internal validation overstates performance.** Every model scores 0.99 or more internally and 0.92–0.94 externally, and the internal ranking does not carry over. Most external errors are in smooth muscle and stroma (probe F1 0.74 for both).
+2. **The two approaches generalise equally well on the data as released**, with different error profiles. The ResNet-50 handles smooth muscle better (F1 0.85 vs 0.74); the probe is stronger on debris, normal mucosa and lymphocytes.
+3. **Frozen foundation-model features are the most sensitive to stain variation.** Under the stain shift the probe loses 8.2 points, mostly on tumour (F1 0.99 → 0.82), stroma and smooth muscle, and its calibration error nearly triples: it is more often wrong without being less confident. The fine-tuned CNN loses 1.3 points even without colour augmentation, so most of its robustness comes from fine-tuning rather than from augmentation.
+4. **Per-patch Macenko normalisation is not a safe default.** It partly recovers the probe on shifted data (0.855 → 0.873) but lowers accuracy for every model on the unshifted external set, and debris collapses in all three (to F1 0.64–0.68 on shifted data). Per-patch stain estimates are unreliable on patches without a typical haematoxylin–eosin mix, yet only one patch failed outright, so the damage is silent. Normalising at slide level, where stain vectors are estimated over much more tissue, is the usual remedy.
 
 ---
 
 ## Limitations
 
-- **Possible patient-level leakage in internal validation.** The training set does not provide patient identifiers, so the internal split can place patches from the same patient on both sides and overstate accuracy. The external set, drawn from different patients, is the more reliable estimate of real-world performance.
-- **Patch-level task.** Patches are pre-extracted and labelled; this project does not cover whole-slide tiling, tissue detection or slide-level aggregation.
-- **Single external set.** One external cohort cannot represent the full variation across labs, scanners and staining protocols.
-- **Subset training.** A 27k-patch subset is used for speed; results with the full dataset may differ.
+- **One training run per model.** Confidence intervals cover patch sampling only, not training randomness. Differences of about one point (for example, with and without colour jitter) could change with another seed; the 8-point gap is far larger.
+- **Optimistic confidence intervals.** Patches, not patients, are resampled, and patches from one patient are correlated.
+- **Possible patient-level leakage in internal validation.** The training set has no patient identifiers, so the internal split can place patches from the same patient on both sides.
+- **A simulated stain shift.** One global transformation is a controlled test, not a substitute for real data from other labs and scanners.
+- **Patch-level task.** Patches are pre-extracted and labelled; whole-slide tiling, tissue detection and slide-level aggregation are not covered.
+- **Subset training.** 27,000 of 100,000 training patches are used, for speed.
 
 ---
 
 ## How to run
 
-**Requirements:** Python 3.10+, a CUDA GPU for feature extraction and fine-tuning (the linear probe runs on CPU).
+**Requirements:** Python 3.10+ and [uv](https://docs.astral.sh/uv/). The device is chosen automatically: Apple GPU (MPS), then CUDA, then CPU. All settings are [Hydra](https://hydra.cc) configs in `conf/`, and any of them can be overridden from the command line.
 
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
-
-**1. Download the data** from Zenodo and unzip into `data/`:
-
-```text
-data/NCT-CRC-HE-100K/<CLASS>/*.tif
-data/CRC-VAL-HE-7K/<CLASS>/*.tif
-```
-
-**2. Build the subset and external index**
 
 ```bash
-python make_subset.py
+# 1. Download and extract the data from Zenodo (resumable, checksum-verified)
+uv run python scripts/download_data.py
+
+# 2. Stratified training subset, internal split and external index
+uv run python scripts/make_subset.py
+
+# 3. (optional) Look at the stain conditions
+uv run python scripts/plot_stain_example.py
+
+# 4. Extract and cache Phikon features for every condition
+uv run python scripts/extract_features.py
+
+# 5. Linear probe and evaluation
+uv run python scripts/probe_eval.py
+
+# 6. Fine-tune ResNet-50, with and without colour jitter (about 25-30 min each on an Apple M3 Pro)
+uv run python scripts/finetune_resnet.py
+uv run python scripts/finetune_resnet.py augment.color_jitter=false output_dir=results/resnet_nojitter \
+    "model_label='ResNet-50, no colour jitter'"
+
+# 7. Comparison table and figure
+uv run python scripts/compare_models.py
 ```
 
-**3. Extract and cache foundation-model features**
+Useful overrides:
 
 ```bash
-python extract_features.py splits/train.csv feats/train.npy
-python extract_features.py splits/external.csv feats/external.npy
-python extract_features.py splits/external.csv feats/external_macenko.npy macenko
+uv run python scripts/finetune_resnet.py debug.max_train_batches=20 debug.eval_samples=500   # quick smoke test
+uv run python scripts/plot_stain_example.py stain.shift.h_scale=1.6 stain.shift.e_scale=0.5  # try another shift
+uv run python scripts/rebuild_report.py run_dir=results/resnet model_label=ResNet-50          # redo figures from saved predictions
 ```
 
-**4. Linear probe and evaluation**
-
-```bash
-python probe_eval.py
-```
-
-**5. Fine-tune the CNN** (locally, or on a Slurm cluster)
-
-```bash
-python finetune_resnet.py
-# or
-sbatch slurm/train.sh
-```
-
-All random seeds are fixed (`random_state=0`) so splits and subsets are reproducible.
+All random seeds are fixed, so subsets, splits and bootstrap intervals are reproducible.
 
 ---
 
@@ -134,26 +154,37 @@ All random seeds are fixed (`random_state=0`) so splits and subsets are reproduc
 ```text
 .
 ├── README.md
-├── requirements.txt
-├── make_subset.py          # stratified training subset + external index
-├── extract_features.py     # Phikon feature extraction (optional Macenko normalisation)
-├── probe_eval.py           # linear probe, metrics, calibration, confusion matrices
-├── finetune_resnet.py      # ResNet-50 fine-tuning and evaluation
-├── slurm/
-│   └── train.sh            # example Slurm job
-├── splits/                 # generated CSVs (not committed)
-├── feats/                  # cached features (not committed)
-└── figs/                   # result figures
+├── pyproject.toml / uv.lock
+├── conf/                       # Hydra configs, one per script
+│   ├── stain.yaml              # Macenko reference and stain shift, shared by all scripts
+│   ├── download.yaml  subset.yaml  plot_stain.yaml  features.yaml
+│   └── probe.yaml  resnet.yaml  compare.yaml  rebuild_report.yaml
+├── scripts/
+│   ├── download_data.py        # Zenodo download, resume, md5 check, extraction
+│   ├── make_subset.py          # stratified subset, internal split, external index
+│   ├── stain.py                # Macenko normalisation and stain shift (shared)
+│   ├── plot_stain_example.py   # patches under each stain condition
+│   ├── extract_features.py     # cached Phikon features per condition
+│   ├── evaluation.py           # metrics, bootstrap CIs, figures (shared)
+│   ├── probe_eval.py           # linear probe and evaluation
+│   ├── finetune_resnet.py      # ResNet-50 fine-tuning and evaluation
+│   ├── rebuild_report.py       # rebuild tables and figures from saved predictions
+│   └── compare_models.py       # comparison table and figure
+├── results/                    # metrics tables per model (predictions and weights not committed)
+├── figs/                       # figures used in this README
+├── data/  splits/  feats/      # generated, not committed
 ```
 
 ---
 
 ## References
 
-- Kather, J. N., et al. (2019). Predicting survival from colorectal cancer histology slides using deep learning: a retrospective multicenter study. *PLOS Medicine*, 16(1), e1002730. Dataset: Zenodo, doi:10.5281/zenodo.1214456.
+- Kather, J. N., et al. (2019). Predicting survival from colorectal cancer histology slides using deep learning: a retrospective multicenter study. *PLOS Medicine*, 16(1), e1002730. Data: Zenodo, doi:10.5281/zenodo.1214456.
 - Filiot, A., et al. (2023). Scaling self-supervised learning for histopathology with masked image modeling. *medRxiv*. Model: [owkin/phikon](https://huggingface.co/owkin/phikon).
 - Macenko, M., et al. (2009). A method for normalizing histology slides for quantitative analysis. *IEEE International Symposium on Biomedical Imaging*, 1107–1110.
+- Ruifrok, A. C., & Johnston, D. A. (2001). Quantification of histochemical staining by color deconvolution. *Analytical and Quantitative Cytology and Histology*, 23(4), 291–299.
 - He, K., et al. (2016). Deep residual learning for image recognition. *IEEE CVPR*, 770–778.
+- Guo, C., et al. (2017). On calibration of modern neural networks. *ICML*, 1321–1330.
 
 ---
 
